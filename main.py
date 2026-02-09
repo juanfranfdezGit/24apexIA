@@ -3,34 +3,38 @@ import random
 
 app = FastAPI()
 
+TRACK_WIDTH = 120
+
+current_bias = 0
+timer = 0
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    global current_bias, timer
+
     await ws.accept()
-    print("Cliente conectado")
+    print("Agent connected")
 
     while True:
         state = await ws.receive_json()
 
-        lateral = state.get("lateralOffset", 0)
-        curvature = state.get("curvatureAhead", 0)
-        front_dist = state.get("frontDist", 0)
-        speed = state.get("speed", 0)
+        lateral = state["lateralOffset"]
+        front_dist = state["frontDist"]
+        speed = state["speed"]
 
-        track_width = 120
+        timer -= 1
+        if timer <= 0:
+            current_bias = random.uniform(-TRACK_WIDTH/3, TRACK_WIDTH/3)
+            timer = random.randint(30, 120)
 
-        # --- Política lateral ---
-        # Lateral target dinámico con algo de ruido
-        lateral_target = -lateral + random.uniform(-20, 20)
-        lateral_target = max(-track_width/2, min(track_width/2, lateral_target))
+        lateral_target = current_bias - lateral * 0.3
 
-        # --- Política velocidad ---
-        throttle = 0.6 + random.uniform(-0.1, 0.1)
-        if abs(curvature) > 0.1 or front_dist < 15:
-            throttle = 0.3
-        elif front_dist > 50:
-            throttle = 0.8
+        throttle = 0.7
+        if front_dist < 20:
+            throttle = 0.2
+        elif speed > 60:
+            throttle = 0.9
 
-        # Enviar acción al cliente
         action = {
             "lateralTarget": lateral_target,
             "throttle": throttle
