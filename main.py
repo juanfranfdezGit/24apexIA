@@ -4,39 +4,57 @@ import random
 app = FastAPI()
 
 TRACK_WIDTH = 120
-
+bestLapTime = float("inf")
+best_bias = 0
 current_bias = 0
-timer = 0
+target_bias = 0
+prev_lap = 0
+prev_t = 0
+bias_timer = 0
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    global current_bias, timer
+    global bestLapTime, best_bias, current_bias, target_bias, prev_lap, prev_t, bias_timer
 
     await ws.accept()
     print("Agent connected")
 
     while True:
         state = await ws.receive_json()
+        t = state["t"]
+        lap = state["lap"]
+        lastLapTime = state["lastLapTime"]
 
-        lateral = state["lateralOffset"]
-        front_dist = state["frontDist"]
-        speed = state["speed"]
+        # --- Reward simple: progreso ---
+        reward = (t - prev_t) % 1
+        prev_t = t
 
-        timer -= 1
-        if timer <= 0:
-            current_bias = random.uniform(-TRACK_WIDTH/3, TRACK_WIDTH/3)
-            timer = random.randint(30, 120)
+        # --- Comprobar vuelta ---
+        if lap > prev_lap:
+            prev_lap = lap
+            if lastLapTime < bestLapTime:
+                bestLapTime = lastLapTime
+                best_bias = current_bias
+                print(f"New best lap: {bestLapTime:.2f}s, best_bias={best_bias:.2f}")
 
-        lateral_target = current_bias - lateral * 0.3
+        # --- Actualiza el target_bias periódicamente ---
+        bias_timer -= 1
+        if bias_timer <= 0:
+            # Nuevo objetivo aleatorio cerca de la mejor trazada
+            target_bias = best_bias + random.uniform(-TRACK_WIDTH * 0.1, TRACK_WIDTH * 0.1)
+            target_bias = max(-TRACK_WIDTH/2, min(TRACK_WIDTH/2, target_bias))
+            bias_timer = random.randint(30, 60)  # cambiar cada 0.5-1s aprox
 
-        throttle = 0.7
-        if front_dist < 20:
-            throttle = 0.2
-        elif speed > 60:
-            throttle = 0.9
+        # --- Mueve suavemente current_bias hacia target_bias ---
+        smoothing = 0.05  # porcentaje de interpolación por tick
+        current_bias += (target_bias - current_bias) * smoothing
+
+        # --- Acción final ---
+        lateralTarget = current_bias
+        throttle = 0.7  # fijo por ahora
 
         action = {
-            "lateralTarget": lateral_target,
+            "lateralTarget": lateralTarget,
             "throttle": throttle
         }
 
